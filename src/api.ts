@@ -26,7 +26,10 @@ export const isMobile = isAndroid || isIos;
  *  Windows / Android → `http://<scheme>.localhost`
  *  macOS / iOS / Linux → `<scheme>://localhost`
  *  Rust 侧 `src-tauri/src/lib.rs` 里改写 m3u8 用的 scheme 必须与此一致。 */
-export const LOCAL = isMacos || isIos || isLinux ? "hg://localhost" : "http://hg.localhost";
+/** 网页版（vite.web.config.ts 构建）：媒体走同源 HTTP 代理 /media，替代 hg:// 协议。 */
+export const LOCAL = import.meta.env.VITE_WEB
+  ? "/media"
+  : isMacos || isIos || isLinux ? "hg://localhost" : "http://hg.localhost";
 
 /** src 是否已是本地协议地址（避免在详情页把代理地址再包一层） */
 export const isLocalMedia = (src: string) => src.startsWith(`${LOCAL}/`);

@@ -1,0 +1,25 @@
+[Unit]
+Description=HGhub 网页版服务
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hghub
+Group=hghub
+EnvironmentFile=/etc/hghub-web.env
+ExecStart=/usr/local/bin/hghub-web
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/hghub-web
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
