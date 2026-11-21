@@ -3,7 +3,9 @@
 逐项输出 PASS/FAIL；密码隐藏输入，不落盘。"""
 import getpass, http.cookiejar, json, re, sys, urllib.error, urllib.parse, urllib.request
 
-BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8900").rstrip("/")
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+WANT_DL = "--download" in sys.argv
+BASE = (ARGS[0] if ARGS else "http://127.0.0.1:8900").rstrip("/")
 results = []
 def mark(name, ok, info=""):
     results.append(ok); print(f"[{'PASS' if ok else 'FAIL'}] {name}  {info}")
@@ -93,6 +95,39 @@ if segs:
         ss, _, bs = req(segs[-1]); mark("末尾分片经代理 200", ss == 200 and len(bs) > 1000, f"{ss} {len(bs)}B")
 else:
     mark("视频分片经代理 200", False, "清单里没有分片行")
+
+if WANT_DL:
+    import os, shutil, subprocess, tempfile, time
+    print(f"== 下载本集：id={vid} 第{ep}集")
+    s, _, b = req("/api/download/start", json.dumps({"id": vid, "ep": ep}).encode(), "application/json", 60)
+    job = (json.loads(b or b"{}") or {}).get("job") if s == 200 else None
+    mark("下载任务已创建", bool(job), f"{s} {b[:120]!r}" if not job else job)
+    st = {}
+    t0 = time.time()
+    while job and time.time() - t0 < 900:
+        s, _, b = req(f"/api/download/status/{job}")
+        st = json.loads(b or b"{}")
+        if st.get("state") in ("done", "error"): break
+        print(f"   {st.get('state')} {st.get('done')}/{st.get('total')}", end="\r", flush=True)
+        time.sleep(2)
+    print()
+    mark("服务器合成 MP4", st.get("state") == "done",
+         f"{st.get('filename')} {st.get('bytes', 0)/1048576:.1f}MB 成片{st.get('duration', 0):.0f}s / 清单{st.get('expected', 0):.0f}s / 接口{play.get('duration')}s" if st.get("state") == "done" else str(st.get("error")))
+    if st.get("state") == "done":
+        tmp = tempfile.mkdtemp()
+        path = os.path.join(tmp, "ep.mp4")
+        s, h, b = req(f"/download/{job}", timeout=600)
+        open(path, "wb").write(b)
+        disp = h.get("Content-Disposition", "")
+        mark("文件下载（附件形式）", s == 200 and len(b) == st["bytes"] and "attachment" in disp, f"{s} {len(b)}B")
+        if shutil.which("ffprobe"):
+            dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                                       capture_output=True, text=True).stdout.strip() or 0)
+            dec = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-f", "null", "-"], capture_output=True, text=True)
+            mark("成片完整解码无错误", dec.returncode == 0 and not dec.stderr.strip(), dec.stderr.strip()[:160])
+            ref = st.get("expected") or play.get("duration") or 0
+            mark("成片时长与原片一致", ref > 0 and abs(dur - ref) <= ref * 0.03 + 2, f"{dur:.1f}s vs {ref:.1f}s")
+        shutil.rmtree(tmp, ignore_errors=True)
 
 print(f"== 结果：{sum(results)}/{len(results)} 通过" + ("，全部通过" if all(results) else "，有失败项"))
 sys.exit(0 if all(results) else 1)

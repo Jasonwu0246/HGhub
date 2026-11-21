@@ -3,6 +3,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 [ "$(id -u)" = 0 ] || { echo "请用 sudo 运行"; exit 1; }
+if ! command -v ffmpeg >/dev/null || ! command -v ffprobe >/dev/null; then
+  echo "== 安装 ffmpeg（「下载本集」用来把分片合成 MP4）"
+  apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ffmpeg >/dev/null
+fi
 id hghub >/dev/null 2>&1 || useradd --system --home /var/lib/hghub-web --shell /usr/sbin/nologin hghub
 install -d -o hghub -g hghub -m 700 /var/lib/hghub-web
 install -m 755 hghub-web /usr/local/bin/hghub-web
@@ -25,6 +29,7 @@ systemctl enable hghub-web >/dev/null 2>&1
 systemctl restart hghub-web
 sleep 2
 echo "== 回读"
+echo "ffmpeg: $(ffmpeg -version 2>/dev/null | head -1 | cut -d" " -f1-3)"
 echo "binary sha256: $(sha256sum /usr/local/bin/hghub-web | cut -c1-16)"
 echo "enabled: $(systemctl is-enabled hghub-web)   active: $(systemctl is-active hghub-web)"
 grep HGHUB_BIND /etc/hghub-web.env

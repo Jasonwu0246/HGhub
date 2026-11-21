@@ -31,6 +31,7 @@ mod playback_log;
 mod session;
 
 mod auth;
+mod download;
 
 use axum::{
     body::{Body, Bytes},
@@ -53,6 +54,7 @@ pub struct App {
     api: api::Api,
     data_dir: PathBuf,
     auth: auth::Auth,
+    downloads: Arc<download::Downloads>,
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -90,7 +92,8 @@ async fn main() {
     // 与 src-tauri/src/lib.rs 的 setup 一致：恢复线路、安全模式、诊断日志、账号会话
     net::bind_base(&data_dir);
     playback_log::bind(&data_dir);
-    let app = Arc::new(App { api: api::Api::new(), data_dir: data_dir.clone(), auth });
+    let downloads = Arc::new(download::Downloads::new(&data_dir));
+    let app = Arc::new(App { api: api::Api::new(), data_dir: data_dir.clone(), auth, downloads });
     app.api.session.bind(data_dir.clone());
 
     let index = static_dir.join("index.html");
@@ -99,6 +102,9 @@ async fn main() {
     let gated = Router::new()
         .route("/api/invoke/{cmd}", post(invoke))
         .route("/media/{kind}", get(media_proxy))
+        .route("/api/download/start", post(download_start))
+        .route("/api/download/status/{job}", get(download_status))
+        .route("/download/{job}", get(download_file))
         .route("/logout", post(logout))
         .fallback_service(spa)
         .layer(middleware::from_fn_with_state(app.clone(), require_login));
@@ -223,6 +229,50 @@ async fn media_proxy(Path(kind): Path<String>, RawQuery(query): RawQuery) -> Res
     let path = format!("/{kind}");
     let resp = media::handle(&path, query.as_deref().unwrap_or(""), MEDIA_PREFIX).await;
     resp.map(Body::from)
+}
+
+/* ───────────────────────── 下载本集 ───────────────────────── */
+
+#[derive(serde::Deserialize)]
+struct DownloadReq {
+    id: i64,
+    ep: u32,
+}
+
+async fn download_start(State(app): State<Arc<App>>, Json(r): Json<DownloadReq>) -> Response {
+    match app.downloads.start(app.clone(), r.id, r.ep) {
+        Ok(job) => Json(json!({ "job": job })).into_response(),
+        Err(e) => err_response(e),
+    }
+}
+
+async fn download_status(State(app): State<Arc<App>>, Path(job): Path<String>) -> Response {
+    match app.downloads.status(&job) {
+        Some(s) => ([(header::CACHE_CONTROL, "no-store")], Json(s)).into_response(),
+        None => (StatusCode::NOT_FOUND, Json(json!("下载任务不存在或已过期"))).into_response(),
+    }
+}
+
+async fn download_file(State(app): State<Arc<App>>, Path(job): Path<String>) -> Response {
+    let Some((path, name)) = app.downloads.file(&job) else {
+        return (StatusCode::NOT_FOUND, "下载任务不存在、未完成或已过期").into_response();
+    };
+    let file = match tokio::fs::File::open(&path).await {
+        Ok(f) => f,
+        Err(_) => return (StatusCode::NOT_FOUND, "文件已清理").into_response(),
+    };
+    let len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
+    let encoded = percent_encoding::utf8_percent_encode(&name, percent_encoding::NON_ALPHANUMERIC).to_string();
+    (
+        [
+            (header::CONTENT_TYPE, "video/mp4".to_string()),
+            (header::CONTENT_LENGTH, len.to_string()),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"episode.mp4\"; filename*=UTF-8''{encoded}")),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        Body::from_stream(tokio_util::io::ReaderStream::new(file)),
+    )
+        .into_response()
 }
 
 /* ───────────────────────── invoke → HTTP ───────────────────────── */
