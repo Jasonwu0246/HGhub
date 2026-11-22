@@ -8,7 +8,7 @@
   - `POST /api/invoke/<cmd>`：替代原生 `invoke`
   - `GET /media/{img,hls,seg}?u=`：替代 `hg://` 媒体协议
   - `/login`：密码登录门（Argon2 哈希、会话 Cookie 30 天、同一 IP 连错 5 次锁 15 分钟）；未登录时页面、接口、媒体一律不可见
-  - 多集合并：选集面板「多集合并下载」→ 勾选若干集 → `POST /api/download/start {id, eps:[…]}`；服务器逐集取回封装，核对各集规格一致后 ffmpeg concat 无损拼接成一个 MP4，每集一个章节，核对总时长；硬盘不足（每集前需 800MB、合并前需各集总大小 +200MB）会提前停下并提示。成片保留 2 小时，离开页面后回到该剧选集可继续看进度、保存。
+  - 多集合并：选集面板「多集合并下载」→ 勾选若干集 → `POST /api/download/start {id, eps:[…]}`；服务器先只取每集「清单 + 第一小段」检查规格，以多数集为准：一致的集无损，规格不同的集单独转码统一（只有音频不同则只转音频；没有声音的补静音；转码集关键帧内嵌参数集、时间基统一 90000），再 ffmpeg concat 拼成一个 MP4，每集一个章节，核对总时长；硬盘不足（每集前需 800MB、合并前需各集总大小 +200MB）会提前停下并提示。成片保留 2 小时，离开页面后回到该剧选集可继续看进度、保存。
   - 「下载本集」：`POST /api/download/start` → `GET /api/download/status/<job>` → `GET /download/<job>`。服务器经同一媒体代理取回全部分片与 Key，用 ffmpeg 解密并无损封装为 MP4（`-c copy`），ffprobe 核对时长与清单一致后才算完成；同时最多 2 集，成片 1 小时后清理。入口在播放页「选集」面板顶部，仅网页版构建显示。需要服务器装 ffmpeg（install.sh 会自动装）。
 - `web/`、`vite.web.config.ts`：前端适配层，把 `@tauri-apps/api/core|window` 换成 HTTP 版；`src/api.ts` 在 `VITE_WEB` 下令 `LOCAL = "/media"`。桌面/移动端原有构建不受影响。
 - `web-server/deploy/`：`install.sh`（systemd 常驻 + 开机自启）、`verify.py`（验真）、`hghub-web.service`。

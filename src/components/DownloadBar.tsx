@@ -5,9 +5,9 @@ import { IDownload } from "../icons";
    完成后 Safari 存到「文件」，离线可看。只在网页版构建（VITE_WEB）里出现。 */
 
 type Status = {
-  state: "running" | "muxing" | "merging" | "done" | "error";
+  state: "checking" | "running" | "muxing" | "transcoding" | "merging" | "done" | "error";
   done: number; total: number; ep_index: number; ep_count: number; cur_ep: number;
-  filename: string; bytes: number; duration: number; expected: number; error?: string | null;
+  filename: string; bytes: number; duration: number; expected: number; error?: string | null; note?: string | null;
 };
 
 async function call<T>(url: string, init?: RequestInit): Promise<T> {
@@ -23,7 +23,7 @@ const hms = (s: number) => {
   const t = Math.round(s), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), x = t % 60;
   return h ? `${h}:${String(m).padStart(2, "0")}:${String(x).padStart(2, "0")}` : `${m}:${String(x).padStart(2, "0")}`;
 };
-const busy = (s?: Status | null) => !!s && (s.state === "running" || s.state === "muxing" || s.state === "merging");
+const busy = (s?: Status | null) => !!s && ["checking", "running", "muxing", "transcoding", "merging"].includes(s.state);
 const store = {
   get: (k: string) => { try { return localStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string) => { try { localStorage.setItem(k, v); } catch { /* 无痕模式等 */ } },
@@ -84,9 +84,11 @@ export default function DownloadBar({ videoId, ep, epNums, selecting, selected, 
   const failed = err || st?.state === "error";
 
   // 进度：整体 =（已完成集数 + 当前集分片比例）/ 总集数
+  // 检查规格只占很小一段（0–5%），之后按集推进到 100%
   const overall = st && st.ep_count
     ? st.state === "merging" ? 100
-      : Math.round(((Math.max(st.ep_index, 1) - 1 + (st.total ? st.done / st.total : 0)) / st.ep_count) * 100)
+      : st.state === "checking" ? Math.round((Math.max(st.ep_index, 1) / st.ep_count) * 5)
+      : 5 + Math.round(((Math.max(st.ep_index, 1) - 1 + (st.total ? st.done / st.total : 0)) / st.ep_count) * 95)
     : 0;
 
   let body;
@@ -103,7 +105,7 @@ export default function DownloadBar({ videoId, ep, epNums, selecting, selected, 
           className="mt-2 w-full h-9 rounded-(--r-ctl) bg-primary text-on-primary text-[12.5px] font-semibold disabled:opacity-40 pressable">
           {selected.length > 1 ? `合并成一个视频下载（${selected.length} 集）` : selected.length === 1 ? "下载这 1 集" : "点下面的集数来选择"}
         </button>
-        <div className="mt-1.5 text-[10.5px] text-dim">点集数勾选，服务器按顺序取回并无损合并，每集一个章节。</div>
+        <div className="mt-1.5 text-[10.5px] text-dim">点集数勾选。服务器先检查各集规格，一致的无损合并；个别集不同会单独转码统一。每集一个章节。</div>
       </div>
     );
   } else if (st?.state === "done" && job) {
@@ -112,6 +114,7 @@ export default function DownloadBar({ videoId, ep, epNums, selecting, selected, 
         <div className="min-w-0 flex-1">
           <div className="truncate text-[12px] font-semibold text-on">{st.filename}</div>
           <div className="text-[10.5px] text-mut">{mb(st.bytes)} · {hms(st.duration)}{st.ep_count > 1 ? ` · ${st.ep_count} 集` : ""} · 已核对完整</div>
+          {st.note && <div className="text-[10px] text-dim">{st.note.replace("会单独转码统一", "已单独转码统一")}</div>}
         </div>
         <a href={`/download/${encodeURIComponent(job)}`} download={st.filename}
           className="shrink-0 h-8 px-3 rounded-(--r-ctl) bg-primary text-on-primary text-[12px] font-semibold flex items-center pressable">
@@ -121,8 +124,10 @@ export default function DownloadBar({ videoId, ep, epNums, selecting, selected, 
     );
   } else if (busy(st)) {
     const s = st!;
+    const k = `${Math.max(s.ep_index, 1)}/${s.ep_count}`;
     const label = s.state === "merging" ? `正在合并 ${s.ep_count} 集…`
-      : s.ep_count > 1 ? `第 ${Math.max(s.ep_index, 1)}/${s.ep_count} 集（第${s.cur_ep}集）${s.state === "muxing" ? "封装中" : "取回中"}`
+      : s.state === "checking" ? `检查各集规格 ${k}`
+      : s.ep_count > 1 ? `第 ${k} 集（第${s.cur_ep}集）${s.state === "transcoding" ? "转码统一中" : s.state === "muxing" ? "封装中" : "取回中"}`
       : s.state === "muxing" ? "正在合成 MP4…" : `正在取回第 ${s.cur_ep} 集`;
     body = (
       <div>
@@ -133,7 +138,8 @@ export default function DownloadBar({ videoId, ep, epNums, selecting, selected, 
         <div className="mt-2 h-1.5 rounded-full bg-s2 overflow-hidden">
           <div className="h-full bg-primary transition-all" style={{ width: `${overall}%` }} />
         </div>
-        {s.ep_count > 1 && <div className="mt-1.5 text-[10.5px] text-dim">可以先去看别的，回到这部剧的选集还能看到进度。</div>}
+        {s.note && <div className="mt-1.5 text-[10.5px] text-on/80">{s.note}</div>}
+        {s.ep_count > 1 && <div className="mt-1 text-[10.5px] text-dim">可以先去看别的，回到这部剧的选集还能看到进度。{s.state === "transcoding" ? "转码比较慢，请耐心等。" : ""}</div>}
       </div>
     );
   } else {
