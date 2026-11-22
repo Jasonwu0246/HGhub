@@ -17,6 +17,11 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
 }) {
   const [asc, setAsc] = useState(true);
   const list = asc ? episodes : [...episodes].reverse();
+  // 网页版多选合并下载：选择模式下点集数是勾选，不切换播放
+  const [selecting, setSelecting] = useState(false);
+  const [picked, setPicked] = useState<number[]>([]);
+  useEffect(() => { setSelecting(false); setPicked([]); }, [videoId]);
+  const toggle = (n: number) => setPicked((p) => (p.includes(n) ? p.filter((x) => x !== n) : [...p, n].sort((a, b) => a - b)));
   return (
     <div className="flex flex-col h-full">
       {bare ? (
@@ -36,13 +41,22 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
       )}
       <div className="flex-1 scroll-y px-4 pb-4">
         {current > 0 && (import.meta.env.VITE_WEB
-          ? <DownloadBar videoId={videoId} ep={current} />
+          ? <DownloadBar videoId={videoId} ep={current} epNums={episodes.map((e) => e.ep_num)}
+              selecting={selecting} selected={picked}
+              onSelecting={(on) => { setSelecting(on); setPicked(on ? [current] : []); }}
+              onSelectAll={() => setPicked(episodes.map((e) => e.ep_num).sort((a, b) => a - b))}
+              onClearSel={() => setPicked([])} />
           : isWindows && <NativeDownloadBar videoId={videoId} ep={current} />)}
         <div className="grid grid-cols-4 gap-2">
           {list.map((e) => (
-            <button key={e.ep_num} onClick={() => onPick(e.ep_num)}
-              className={`h-10 rounded-(--r-sm) text-[12px] font-semibold pressable ${e.ep_num === current ? "bg-primary text-on-primary" : "bg-s3 text-on/80"}`}>
+            <button key={e.ep_num} onClick={() => (selecting ? toggle(e.ep_num) : onPick(e.ep_num))}
+              aria-pressed={selecting ? picked.includes(e.ep_num) : undefined}
+              className={`relative h-10 rounded-(--r-sm) text-[12px] font-semibold pressable ${
+                selecting
+                  ? picked.includes(e.ep_num) ? "bg-primary text-on-primary" : "bg-s3 text-on/60 ring-1 ring-inset ring-s2"
+                  : e.ep_num === current ? "bg-primary text-on-primary" : "bg-s3 text-on/80"}`}>
               {e.ep_num}
+              {selecting && picked.includes(e.ep_num) && <span className="absolute top-0.5 right-1 text-[9px]">✓</span>}
             </button>
           ))}
         </div>

@@ -5,6 +5,7 @@ import getpass, http.cookiejar, json, re, sys, urllib.error, urllib.parse, urlli
 
 ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
 WANT_DL = "--download" in sys.argv
+WANT_MERGE = "--merge" in sys.argv
 BASE = (ARGS[0] if ARGS else "http://127.0.0.1:8900").rstrip("/")
 results = []
 def mark(name, ok, info=""):
@@ -128,6 +129,39 @@ if WANT_DL:
             ref = st.get("expected") or play.get("duration") or 0
             mark("成片时长与原片一致", ref > 0 and abs(dur - ref) <= ref * 0.03 + 2, f"{dur:.1f}s vs {ref:.1f}s")
         shutil.rmtree(tmp, ignore_errors=True)
+
+if WANT_MERGE:
+    import os, shutil, subprocess, tempfile, time
+    eps2 = [e.get("ep_num") for e in eps[:2] if e.get("ep_num")]
+    if len(eps2) < 2:
+        mark("多集合并（需要至少 2 集）", False, f"这部剧只有 {len(eps)} 集")
+    else:
+        print(f"== 多集合并：id={vid} 第{eps2}集")
+        s, _, b = req("/api/download/start", json.dumps({"id": vid, "eps": eps2}).encode(), "application/json", 60)
+        job = (json.loads(b or b"{}") or {}).get("job") if s == 200 else None
+        mark("合并任务已创建", bool(job), job or f"{s} {b[:120]!r}")
+        st, t0 = {}, time.time()
+        while job and time.time() - t0 < 1800:
+            s, _, b = req(f"/api/download/status/{job}")
+            st = json.loads(b or b"{}")
+            if st.get("state") in ("done", "error"): break
+            print(f"   {st.get('state')} 第{st.get('ep_index')}/{st.get('ep_count')}集 {st.get('done')}/{st.get('total')}   ", end="\r", flush=True)
+            time.sleep(2)
+        print()
+        ok = st.get("state") == "done"
+        mark("服务器合并成一个 MP4", ok, f"{st.get('filename')} {st.get('bytes', 0)/1048576:.1f}MB {st.get('duration', 0):.0f}s" if ok else str(st.get("error")))
+        if ok:
+            tmp = tempfile.mkdtemp(); path = os.path.join(tmp, "m.mp4")
+            s, h, b = req(f"/download/{job}", timeout=1800); open(path, "wb").write(b)
+            mark("合并文件下载", s == 200 and len(b) == st["bytes"], f"{s} {len(b)}B")
+            if shutil.which("ffprobe"):
+                dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path], capture_output=True, text=True).stdout.strip() or 0)
+                chs = subprocess.run(["ffprobe", "-v", "error", "-show_chapters", "-of", "csv=p=0", path], capture_output=True, text=True).stdout.strip().splitlines()
+                dec = subprocess.run(["ffmpeg", "-v", "error", "-i", path, "-f", "null", "-"], capture_output=True, text=True)
+                mark("合并成片完整解码无错误", dec.returncode == 0 and not dec.stderr.strip(), dec.stderr.strip()[:160])
+                mark("合并时长 = 各集清单之和", abs(dur - st["expected"]) <= st["expected"] * 0.03 + 2, f"{dur:.1f}s vs {st['expected']:.1f}s")
+                mark("每集一个章节", len(chs) == len(eps2), f"{len(chs)} 个")
+            shutil.rmtree(tmp, ignore_errors=True)
 
 print(f"== 结果：{sum(results)}/{len(results)} 通过" + ("，全部通过" if all(results) else "，有失败项"))
 sys.exit(0 if all(results) else 1)

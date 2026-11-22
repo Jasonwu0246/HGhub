@@ -236,11 +236,15 @@ async fn media_proxy(Path(kind): Path<String>, RawQuery(query): RawQuery) -> Res
 #[derive(serde::Deserialize)]
 struct DownloadReq {
     id: i64,
-    ep: u32,
+    /// 单集
+    ep: Option<u32>,
+    /// 多集合并为一个视频
+    eps: Option<Vec<u32>>,
 }
 
 async fn download_start(State(app): State<Arc<App>>, Json(r): Json<DownloadReq>) -> Response {
-    match app.downloads.start(app.clone(), r.id, r.ep) {
+    let eps = r.eps.unwrap_or_default().into_iter().chain(r.ep).collect();
+    match app.downloads.start(app.clone(), r.id, eps) {
         Ok(job) => Json(json!({ "job": job })).into_response(),
         Err(e) => err_response(e),
     }
