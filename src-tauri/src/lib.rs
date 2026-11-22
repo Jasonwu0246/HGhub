@@ -1,4 +1,5 @@
 mod api;
+mod download;
 mod lines;
 mod logging;
 #[cfg(target_os = "macos")]
@@ -167,6 +168,9 @@ pub fn run() {
             api::api_like,
             api::api_collect,
             api::api_follow,
+            download::download_start,
+            download::download_status,
+            download::download_reveal,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

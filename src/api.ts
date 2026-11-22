@@ -15,6 +15,7 @@ export const isIos =
   (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) ||
   (typeof navigator.platform === "string" && navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 export const isAndroid = /Android/i.test(ua);
+export const isWindows = /Windows/i.test(ua);
 export const isMacos = !isIos && /Macintosh|Mac OS X/i.test(ua);
 export const isLinux = !isAndroid && !isIos && /Linux/i.test(ua);
 export const platform: "android" | "ios" | "windows" | "macos" | "linux" =

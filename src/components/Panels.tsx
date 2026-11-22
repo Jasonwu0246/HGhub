@@ -5,6 +5,8 @@ import type { Comment, CommentPage, Episode } from "../types";
 import { useStore } from "../store";
 import { Avatar, Empty } from "./ui";
 import DownloadBar from "./DownloadBar";
+import NativeDownloadBar from "./NativeDownloadBar";
+import { isWindows } from "../api";
 import { IClose, IHeart, ISendF } from "../icons";
 
 /* ================= 选集 ================= */
@@ -33,7 +35,9 @@ export function EpisodesPanel({ videoId, episodes, current, onPick, onClose, bar
         </div>
       )}
       <div className="flex-1 scroll-y px-4 pb-4">
-        {import.meta.env.VITE_WEB && current > 0 && <DownloadBar videoId={videoId} ep={current} />}
+        {current > 0 && (import.meta.env.VITE_WEB
+          ? <DownloadBar videoId={videoId} ep={current} />
+          : isWindows && <NativeDownloadBar videoId={videoId} ep={current} />)}
         <div className="grid grid-cols-4 gap-2">
           {list.map((e) => (
             <button key={e.ep_num} onClick={() => onPick(e.ep_num)}
